@@ -1,0 +1,248 @@
+#include <stdio.h>
+#include <string.h>
+#include <sqlca.h>
+#include <stdlib.h>
+#include <sqlda.h>
+#include <sqlcpr.h>
+
+#define UNAME_LEN      20
+#define PWD_LEN        11
+
+/*
+ * Use the precompiler typedef'ing capability to create
+ * null-terminated strings for the authentication host
+ * variables. (This isn't really necessary--plain char *'s
+ * would work as well. This is just for illustration.)
+ */
+
+typedef char asciiz[PWD_LEN];
+
+EXEC SQL TYPE asciiz IS CHARZ(PWD_LEN) REFERENCE;
+asciiz     username;
+asciiz     password;
+
+struct hotel
+{
+        char    hotelName[35];
+        char    hotelNo[5];
+//      asciiz  city;
+};
+
+struct room
+{
+//      char    roomNo[8];
+//      asciiz  hotelNo;
+        char    price[8];
+        char    type[15];
+};
+
+struct count
+{
+        char hotelNo[6];
+        char total[6];
+};
+
+struct guest
+{
+//      asciiz  guestNo;
+        char    guestName[15];
+        char    guestAddress[35];
+};
+
+
+void sql_error(msg)
+    char * msg;
+{
+    char err_msg[512];
+    size_t buf_len, msg_len;
+
+    EXEC SQL WHENEVER SQLERROR CONTINUE;
+
+    printf("\n%s\n", msg);
+
+/* Call sqlglm() to get the complete text of the
+ * error message.
+ */
+    buf_len = sizeof (err_msg);
+    sqlglm(err_msg, &buf_len, &msg_len);
+    printf("%.*s\n", msg_len, err_msg);
+
+    EXEC SQL ROLLBACK RELEASE;
+    exit(EXIT_FAILURE);
+}
+
+void main()
+{
+
+        struct count * count_rec;
+        struct hotel * hotel_rec;
+        struct room * room_rec;
+        struct guest * guest_rec;
+
+/* Allocate memory for structs. */
+        hotel_rec = (struct hotel *)malloc(sizeof(struct hotel));
+        room_rec = (struct room *)malloc(sizeof(struct room));
+        guest_rec = (struct guest *)malloc(sizeof(struct guest));
+        count_rec = (struct count *)malloc(sizeof(struct count));
+
+
+/* Connect to ORACLE. */
+    strcpy(username, "saboece567");
+    strcpy(password, "c11923557");
+
+    EXEC SQL WHENEVER SQLERROR DO sql_error("ORACLE error--");
+
+    EXEC SQL CONNECT :username IDENTIFIED BY :password;
+    printf("\nConnected to ORACLE as user: %s\n", username);
+
+
+//=========================MENU==============================
+
+        printf("1: List the hotel numbers and hotel names of those hotels in Miami\n");
+        printf("2: List the names and addresses of all guests who live in Miami, alphabetically ordered by name.\n");
+        printf("3: List the average price of a room in the database.\n");
+        printf("4: List the price and type of all rooms at the Z Ocean Hotel\n");
+        printf("5: List the number of rooms in each hotel in New York\n");
+        printf("Press the corresponding number to view the query\n");
+
+        int q = 0;
+
+        while(1){
+                scanf("%d", &q);
+                if(q < 1 || q > 5)
+                        printf("Not Valid Option, Select a number 1-5\n");
+                else
+                        break;
+        }
+
+        printf("Option %d Selected\n", q);
+
+//======================END MENU=============================
+
+        switch(q){
+                case 1:
+                    EXEC SQL DECLARE miamiHotels CURSOR FOR
+                        SELECT hotelName, hotelNo
+                           FROM hotel
+                           WHERE city LIKE '%Miami%';
+
+                    EXEC SQL OPEN miamiHotels;
+
+                        /* Get ready to print results. */
+                        printf("\n----------Hotels in Miami----------\n");
+                        printf("Hotel Name               Hotel Number\n");
+                        printf("----------               ------------\n");
+
+                    EXEC SQL WHENEVER NOT FOUND DO break;
+//                      printf("About to loop\n");
+                    for (;;)
+                    {
+                        EXEC SQL FETCH miamiHotels INTO :hotel_rec;
+//                      printf("After Fetch\n");
+                        printf("%s    %s\n", hotel_rec->hotelName,
+                                 hotel_rec->hotelNo);
+                    }
+//                      printf("DONE LOOP\n");
+                    EXEC SQL CLOSE miamiHotels;
+                        break;
+                case 2:
+                    EXEC SQL DECLARE guestdata CURSOR FOR
+                        SELECT guestName, guestAddress
+                           FROM guest
+                           WHERE guestAddress LIKE '%Miami%'
+                           ORDER BY guestName;
+
+                    EXEC SQL OPEN guestdata;
+
+                        /* Get ready to print results. */
+                        printf("\n--------Guests From Miami--------\n");
+                        printf("Guest Name         Guest Address\n");
+                        printf("----------         -------------\n");
+
+                    EXEC SQL WHENEVER NOT FOUND DO break;
+                    for (;;)
+                    {
+                        EXEC SQL FETCH guestdata INTO :guest_rec;
+                        printf("%s    %s\n", guest_rec->guestName,
+                                 guest_rec->guestAddress);
+                    }
+                    EXEC SQL CLOSE guestdata;
+                        break;
+                case 3:
+                    EXEC SQL DECLARE average CURSOR FOR
+                        SELECT AVG(price)
+                           FROM room;
+
+                    EXEC SQL OPEN average;
+
+                        /* Get ready to print results. */
+                        printf("\nAverage Price\n");
+                        printf("-------------\n");
+
+                        char avg[8];
+
+                    EXEC SQL WHENEVER NOT FOUND DO break;
+                    for (;;)
+                    {
+                        EXEC SQL FETCH average INTO :avg;
+                        printf("%s\n", avg);
+                    }
+                    EXEC SQL CLOSE average;
+
+                        break;
+                case 4:
+                    EXEC SQL DECLARE zData CURSOR FOR
+                        SELECT price, type
+                           FROM room
+                           WHERE hotelNo = (SELECT hotelNo FROM hotel
+                           WHERE hotelName = 'Z Ocean Hotel');
+
+                    EXEC SQL OPEN zData;
+
+                        /* Get ready to print results. */
+                        printf("\nPrice   Type\n");
+                        printf("-----   -----\n");
+
+
+                    EXEC SQL WHENEVER NOT FOUND DO break;
+                    for (;;)
+                    {
+                        EXEC SQL FETCH zData INTO :room_rec;
+                        printf("%s   %s\n", room_rec->price, room_rec->type);
+                    }
+                    EXEC SQL CLOSE zData;
+
+                        break;
+                case 5:
+                    EXEC SQL DECLARE hoteldata CURSOR FOR
+                        SELECT r.hotelNo, COUNT(roomNo)
+                           FROM room r, hotel h
+                           WHERE r.hotelNo = h.hotelNo
+                           AND city = 'New York'
+                           GROUP BY r.hotelNo;
+
+                    EXEC SQL OPEN hoteldata;
+
+                        /* Get ready to print results. */
+                        printf("\nHotelNo   Count\n");
+                        printf("-----   ------\n");
+
+
+                    EXEC SQL WHENEVER NOT FOUND DO break;
+                    for (;;)
+                    {
+                        EXEC SQL FETCH hoteldata INTO :count_rec;
+                        printf("%s   %s\n", count_rec->hotelNo, count_rec->total);
+                    }
+                    EXEC SQL CLOSE hoteldata;
+
+                        break;
+
+        }
+
+    printf("\nGOOD-BYE!!\n\n");
+
+    EXEC SQL COMMIT WORK RELEASE;
+    exit(EXIT_SUCCESS);
+
+}
